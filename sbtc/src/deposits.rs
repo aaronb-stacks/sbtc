@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Stacks Open Internet Foundation
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! This is the transaction analysis module
 //!
 
@@ -10,24 +13,21 @@ use bitcoin::Script;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
+#[cfg(test)]
 use bitcoin::hashes::Hash as _;
-use bitcoin::hashes::sha256;
 use bitcoin::locktime::relative::LockTime;
-use bitcoin::opcodes::Class;
-use bitcoin::opcodes::ClassifyContext;
 use bitcoin::opcodes::all as opcodes;
-use bitcoin::script::Instruction;
+#[cfg(test)]
 use bitcoin::script::PushBytesBuf;
-use bitcoin::taproot::LeafVersion;
-use bitcoin::taproot::NodeInfo;
-use bitcoin::taproot::TaprootSpendInfo;
 use clarity::codec::StacksMessageCodec as _;
 use clarity::types::chainstate::StacksAddress;
 use clarity::vm::types::PrincipalData;
 use clarity::vm::types::QualifiedContractIdentifier;
+#[cfg(test)]
 use secp256k1::SECP256K1;
 use stacks_common::types::chainstate::STACKS_ADDRESS_ENCODED_SIZE;
 
+#[cfg(test)]
 use crate::MAX_RECLAIM_SCRIPT_LENGTH;
 use crate::SignerKeySet;
 use crate::error::Error;
@@ -79,13 +79,11 @@ const OP_CHECKSIG: u8 = opcodes::OP_CHECKSIG.to_u8();
 const OP_PUSHDATA1: u8 = opcodes::OP_PUSHDATA1.to_u8();
 /// The OP_CHECKSEQUENCEVERIFY opcode described in
 /// https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki
+#[cfg(test)]
 const OP_CSV: u8 = opcodes::OP_CSV.to_u8();
 /// Represents the number 1.
+#[cfg(test)]
 const OP_PUSHNUM_1: u8 = opcodes::OP_PUSHNUM_1.to_u8();
-/// Represents the number 16.
-const OP_PUSHNUM_16: u8 = opcodes::OP_PUSHNUM_16.to_u8();
-/// Represents the number -1.
-const OP_PUSHNUM_NEG1: u8 = opcodes::OP_PUSHNUM_NEG1.to_u8();
 
 /// All the info required to verify the validity of a deposit
 /// transaction. This info is sent by the user to the Emily API
@@ -293,7 +291,8 @@ impl CreateDepositRequest {
             reclaim_script,
             signing_info: deposit.signing_info,
             recipient: deposit.recipient,
-            lock_time: reclaim.lock_time,
+            lock_time: LockTime::from_consensus(reclaim.lock_time())
+                .map_err(Error::DisabledLockTime)?,
             amount: tx_out.value.to_sat(),
             outpoint: self.outpoint,
         })
@@ -309,62 +308,12 @@ fn principal_is_mainnet(principal: PrincipalData) -> bool {
     StacksAddress::from(standard_address).is_mainnet()
 }
 
-/// Construct the expected taproot info for a v1 deposit UTXO from its
-/// deposit and reclaim scripts.
-pub fn to_taproot(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> TaprootSpendInfo {
-    let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
-    taproot_with_internal_key(deposit_script, reclaim_script, internal_key)
-}
-
-/// Construct the expected taproot info for a v2 deposit UTXO.
-pub fn to_v2_taproot(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> TaprootSpendInfo {
-    let internal_key = *crate::V2_UNSPENDABLE_TAPROOT_KEY;
-    taproot_with_internal_key(deposit_script, reclaim_script, internal_key)
-}
-
-/// Construct deposit spend information using the supplied internal key.
-fn taproot_with_internal_key(
-    deposit_script: ScriptBuf,
-    reclaim_script: ScriptBuf,
-    internal_key: XOnlyPublicKey,
-) -> TaprootSpendInfo {
-    let ver = LeafVersion::TapScript;
-    // For such a simple tree, we construct it by hand.
-    let leaf1 = NodeInfo::new_leaf_with_ver(deposit_script, ver);
-    let leaf2 = NodeInfo::new_leaf_with_ver(reclaim_script, ver);
-    // A Result::Err is returned by NodeInfo::combine if the depth of
-    // our taproot tree exceeds the maximum depth of taproot trees,
-    // which is 128. We have two nodes so the depth is 1 so this will
-    // never panic.
-    let node = NodeInfo::combine(leaf1, leaf2).expect("Tree depth is greater than the max of 128");
-
-    TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
-}
-
-/// Create the expected ScriptPubKey for v1 deposit and reclaim scripts.
-pub fn to_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> ScriptBuf {
-    let merkle_root = to_taproot(deposit_script, reclaim_script).merkle_root();
-    // Deposit transactions use a NUMS (nothing up my sleeve) public
-    // key for the key-spend path of taproot scripts.
-    let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
-    ScriptBuf::new_p2tr(SECP256K1, internal_key, merkle_root)
-}
-/// Construct a bitcoin address for a v1 deposit UTXO on the given
-/// network.
-fn p2tr_address(deposit_script: ScriptBuf, reclaim_script: ScriptBuf, network: Network) -> Address {
-    let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
-    let merkle_root = to_taproot(deposit_script, reclaim_script).merkle_root();
-    Address::p2tr(SECP256K1, internal_key, merkle_root, network)
-}
-
-/// Create the expected ScriptPubKey for a v2 deposit output.
-pub fn to_v2_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> ScriptBuf {
-    let merkle_root = to_v2_taproot(deposit_script, reclaim_script).merkle_root();
-    // Deposit transactions use a NUMS (nothing up my sleeve) public
-    // key for the key-spend path of taproot scripts.
-    let internal_key = *crate::V2_UNSPENDABLE_TAPROOT_KEY;
-    ScriptBuf::new_p2tr(SECP256K1, internal_key, merkle_root)
-}
+use sbtc_primitives::deposits::p2tr_address;
+#[cfg(test)]
+use sbtc_primitives::deposits::v2_deposit_prefix;
+pub use sbtc_primitives::deposits::{
+    to_script_pubkey, to_taproot, to_v2_script_pubkey, to_v2_taproot,
+};
 
 /// This struct contains the key variable inputs when constructing a
 /// deposit script address.
@@ -389,32 +338,12 @@ impl DepositScriptInputs {
 
     /// Construct a deposit script from the inputs
     pub fn deposit_script(&self) -> ScriptBuf {
-        // The format of the OP_DROP data, as shown in
-        // https://github.com/stacks-network/sbtc/issues/30, is 8 bytes for
-        // the max fee followed by up to 151 bytes for the stacks address.
-        let recipient_bytes = self.recipient.serialize_to_vec();
-        let mut op_drop_data = PushBytesBuf::with_capacity(recipient_bytes.len() + 8);
-        // These should never fail. The PushBytesBuf type only
-        // errors if the total length of the buffer is greater than
-        // u32::MAX. We're pushing a max of 159 bytes.
-        op_drop_data
-            .extend_from_slice(&self.max_fee.to_be_bytes())
-            .expect("8 is greater than u32::MAX?");
-        op_drop_data
-            .extend_from_slice(&recipient_bytes)
-            .expect("159 is greater than u32::MAX?");
-        // When using the bitcoin::script::Builder, push_slice
-        // automatically inserts the appropriate opcodes based on the data
-        // size to be pushed onto the stack. Here, OP_PUSHBYTES_32 is
-        // pushed before the public key. Also, OP_PUSHBYTES_N is used if
-        // the OP_DROP data length is between 1 and 75 otherwise
-        // OP_PUSHDATA1 is used since the data length is less than 255.
-        ScriptBuf::builder()
-            .push_slice(op_drop_data)
-            .push_opcode(opcodes::OP_DROP)
-            .push_slice(self.signers_public_key.serialize())
-            .push_opcode(opcodes::OP_CHECKSIG)
-            .into_script()
+        sbtc_primitives::deposits::DepositScriptInputs {
+            signers_public_key: self.signers_public_key,
+            recipient: self.recipient.serialize_to_vec(),
+            max_fee: self.max_fee,
+        }
+        .deposit_script()
     }
 
     /// This function checks that the deposit script is valid.
@@ -584,10 +513,12 @@ impl DepositScriptInputsV2 {
     /// signers' `multi_a` script, which is exactly
     /// [`SignerKeySet::signing_script`].
     pub fn deposit_script(&self) -> ScriptBuf {
-        let commitment = deposit_data_commitment(self.max_fee, &self.recipient);
-        let mut bytes = v2_deposit_prefix(commitment).into_bytes();
-        bytes.extend_from_slice(self.signer_key_set.signing_script().as_bytes());
-        ScriptBuf::from_bytes(bytes)
+        sbtc_primitives::deposits::DepositScriptInputsV2 {
+            signer_key_set: self.signer_key_set.0.clone(),
+            recipient: self.recipient.serialize_to_vec(),
+            max_fee: self.max_fee,
+        }
+        .deposit_script()
     }
 
     /// Parse and validate the v2 deposit script against recipient and
@@ -597,25 +528,12 @@ impl DepositScriptInputsV2 {
         recipient: PrincipalData,
         max_fee: u64,
     ) -> Result<Self, Error> {
-        let expected_prefix = v2_deposit_prefix(deposit_data_commitment(max_fee, &recipient));
-        let (actual_prefix, signing_script) = deposit_script
-            .as_bytes()
-            .split_at_checked(expected_prefix.len())
-            .ok_or(Error::InvalidDepositScriptLength)?;
-
-        let actual_prefix = ScriptBuf::from_bytes(actual_prefix.to_vec());
-        if actual_prefix != expected_prefix {
-            return Err(Error::InvalidDepositPrefix {
-                actual: actual_prefix,
-                expected: expected_prefix,
-            });
-        }
-
-        let signing_script = Script::from_bytes(signing_script);
-        let signer_key_set = SignerKeySet::parse(signing_script).map_err(|error| match error {
-            Error::InvalidSignerScript => Error::InvalidDepositScript,
-            error => error,
-        })?;
+        let parsed = sbtc_primitives::deposits::DepositScriptInputsV2::parse(
+            deposit_script,
+            recipient.serialize_to_vec(),
+            max_fee,
+        )?;
+        let signer_key_set = SignerKeySet(parsed.signer_key_set);
 
         Ok(Self {
             signer_key_set,
@@ -628,30 +546,13 @@ impl DepositScriptInputsV2 {
 /// Return the 32-byte preimage that a v2 deposit script commits to, and that
 /// the signers reveal when spending the deposit.
 pub fn deposit_data_preimage(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] {
-    let mut data = max_fee.to_be_bytes().to_vec();
-    data.extend(recipient.serialize_to_vec());
-    sha256::Hash::hash(&data).to_byte_array()
+    sbtc_primitives::deposits::deposit_data_preimage(max_fee, &recipient.serialize_to_vec())
 }
 
 /// Return the hash committed to by a v2 deposit script.
+#[cfg(any(test, feature = "testing"))]
 fn deposit_data_commitment(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] {
-    sha256::Hash::hash(&deposit_data_preimage(max_fee, recipient)).to_byte_array()
-}
-
-/// Return the hash-lock prefix of a v2 deposit script, which is
-///
-/// ```text
-/// OP_SIZE <32> OP_EQUALVERIFY OP_SHA256 <commitment> OP_EQUALVERIFY
-/// ```
-fn v2_deposit_prefix(commitment: [u8; 32]) -> ScriptBuf {
-    ScriptBuf::builder()
-        .push_opcode(opcodes::OP_SIZE)
-        .push_int(32)
-        .push_opcode(opcodes::OP_EQUALVERIFY)
-        .push_opcode(opcodes::OP_SHA256)
-        .push_slice(commitment)
-        .push_opcode(opcodes::OP_EQUALVERIFY)
-        .into_script()
+    sbtc_primitives::deposits::deposit_data_commitment(max_fee, &recipient.serialize_to_vec())
 }
 
 /// This struct contains the key variable inputs when constructing a
@@ -674,254 +575,40 @@ fn v2_deposit_prefix(commitment: [u8; 32]) -> ScriptBuf {
 /// <https://github.com/bitcoin/bips/blob/17c04f9fa1ecae173d6864b65717e13dfc1880af/bip-0068.mediawiki#specification>
 /// <https://github.com/bitcoin/bips/blob/812907c2b00b92ee31e2b638622a4fe14a428aee/bip-0112.mediawiki#summary>
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReclaimScriptInputs {
-    /// This is the locktime used for the `OP_CSV` opcode in the reclaim
-    /// script. It is not allowed to exceed the bounds expected for a
-    /// 4-byte locktime in bitcoin-core. It is also not allowed to have
-    /// the [`SEQUENCE_LOCKTIME_DISABLE_FLAG`] bit set.
-    lock_time: LockTime,
-    /// The reclaim script after the `<locked-time> OP_CSV` part of the
-    /// script.
-    script: ScriptBuf,
-}
+pub struct ReclaimScriptInputs(sbtc_primitives::deposits::ReclaimScriptInputs);
 
 impl ReclaimScriptInputs {
-    /// Create a new one, validating that:
-    ///
-    /// * the lock time is a non-disabled block-based time,
-    /// * the user-supplied script is within the maximum length allowed
-    ///   for a reclaim script,
-    /// * the user-supplied script does not contain any OP_SUCCESSx
-    ///   opcodes, see [BIP-342].
-    ///
-    /// [BIP-342]: https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki
+    /// Validate the lock time and user-supplied reclaim script.
     pub fn try_new(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
-        let lock_time = Self::validate_lock_time(lock_time)?;
-        Self::validate_script(&script)?;
-
-        Ok(Self { lock_time, script })
+        sbtc_primitives::deposits::ReclaimScriptInputs::try_new(lock_time, script)
+            .map(Self)
+            .map_err(Into::into)
     }
-
-    /// Create a new one, but without validating the user-supplied script.
-    ///
-    /// The lock time is still validated; only the script-content checks
-    /// performed by [`Self::validate_script`] are skipped. This is used
-    /// to construct otherwise-rejected reclaim scripts in tests that
-    /// exercise the validation logic itself.
+    /// Validate only the lock time, for validation tests.
     #[cfg(any(test, feature = "testing"))]
     pub fn try_new_unvalidated(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
-        let lock_time = Self::validate_lock_time(lock_time)?;
-
-        Ok(Self { lock_time, script })
+        sbtc_primitives::deposits::ReclaimScriptInputs::try_new_unvalidated(lock_time, script)
+            .map(Self)
+            .map_err(Into::into)
     }
-
-    /// Validate the lock time used in the `<lock-time> OP_CSV` prefix of
-    /// the reclaim script.
-    ///
-    /// OP_CSV checks can be disabled if the lock time has the disabled
-    /// lock-time bit set, so we reject any such lock time to ensure that
-    /// the OP_CSV check is always enforced. We also reject time-based
-    /// (as opposed to block-height-based) lock times since we do not yet
-    /// support them.
-    ///
-    /// <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L560-L592>
-    fn validate_lock_time(lock_time: u32) -> Result<LockTime, Error> {
-        let lock_time = LockTime::from_consensus(lock_time).map_err(Error::DisabledLockTime)?;
-
-        // For now, we only accept locktimes denominated in bitcoin block
-        // units.
-        if matches!(lock_time, LockTime::Time(_)) {
-            return Err(Error::UnsupportedLockTimeUnits(
-                lock_time.to_consensus_u32(),
-            ));
-        }
-
-        Ok(lock_time)
-    }
-
-    /// Validate the user-supplied portion of a reclaim script.
-    ///
-    /// This is the script that follows the `<lock-time> OP_CSV` prefix. We
-    /// require:
-    ///
-    /// * its length is at most [`MAX_RECLAIM_SCRIPT_LENGTH`] bytes, and
-    /// * it does not contain any OP_SUCCESSx opcodes.
-    ///
-    /// We reject OP_SUCCESSx in order for the OP_CSV lock to be
-    /// meaningful. BIP-342[1] states that any tapscript containing such an
-    /// opcode is unconditionally valid, which would let a depositor spend
-    /// the reclaim path without satisfying the lock-time.
-    ///
-    /// [1]: <https://github.com/bitcoin/bips/blob/554be702d7d28e3cd1cbf2e84c153f041fdde898/bip-0342.mediawiki>
-    fn validate_script(script: &ScriptBuf) -> Result<(), Error> {
-        if script.len() > MAX_RECLAIM_SCRIPT_LENGTH {
-            return Err(Error::InvalidReclaimScriptLength(script.len()));
-        }
-
-        // We mirror bitcoin-core's pre-execution scan for OP_SUCCESSx
-        // opcodes in tapscript.
-        //
-        // For the corresponding bitcoin-core logic, see the following:
-        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L1784-L1807>
-        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/script.cpp#L341-L347>
-        let has_op_success_ops = script.instructions().any(|op| match op {
-            Ok(Instruction::Op(opcode)) => {
-                opcode.classify(ClassifyContext::TapScript) == Class::SuccessOp
-            }
-            _ => false,
-        });
-
-        if has_op_success_ops {
-            return Err(Error::ReclaimScriptWithSuccessOp(script.clone()));
-        }
-
-        Ok(())
-    }
-
-    /// Get the lock time in the reclaim script.
+    /// Return the consensus lock time.
     pub fn lock_time(&self) -> u32 {
-        self.lock_time.to_consensus_u32()
+        self.0.lock_time()
     }
-
-    /// Return the user supplied part of the script.
-    ///
-    /// The full reclaim script has the form:
-    ///```text
-    ///  <locked-time> OP_CHECKSEQUENCEVERIFY <rest-of-reclaim-script>
-    /// ```
-    /// where the user supplies `<rest-of-reclaim-script>`. This function
-    /// returns `<rest-of-reclaim-script>`.
+    /// Return the script following the lock-time prefix.
     pub fn user_script(&self) -> &Script {
-        self.script.as_script()
+        self.0.user_script()
     }
-
-    /// Create the reclaim script from the inputs
+    /// Construct the reclaim script.
     pub fn reclaim_script(&self) -> ScriptBuf {
-        let mut lock_script = ScriptBuf::builder()
-            .push_int(self.lock_time().into())
-            .push_opcode(opcodes::OP_CSV)
-            .into_script()
-            .into_bytes();
-
-        lock_script.extend(self.script.as_bytes());
-        ScriptBuf::from_bytes(lock_script)
+        self.0.reclaim_script()
     }
-
-    /// Parse the reclaim script for the lock time.
-    ///
-    /// The goal of this function is to make sure that there are no
-    /// surprises in the reclaim script. These scripts are conceptually
-    /// very simple and are their format is
-    /// ```text
-    ///  <locked-time> OP_CHECKSEQUENCEVERIFY <rest-of-reclaim-script>
-    /// ```
-    /// This function extracts the <locked-time> from the script. If the
-    /// script does not start with <locked-time> OP_CHECKSEQUENCEVERIFY
-    /// then we return an error.
-    ///
-    /// See https://github.com/stacks-network/sbtc/issues/30 for the
-    /// expected format of the reclaim script. And see BIP-0112 for
-    /// the details and input conditions of OP_CHECKSEQUENCEVERIFY:
-    /// https://github.com/bitcoin/bips/blob/812907c2b00b92ee31e2b638622a4fe14a428aee/bip-0112.mediawiki#summary
-    pub fn parse(reclaim_script: &ScriptBuf) -> Result<Self, Error> {
-        let (lock_time, script) = match reclaim_script.as_bytes() {
-            // These first two branches check for the case when the script
-            // is written with as few bytes as possible (called minimal
-            // CScriptNum format or something like that).
-            [0, OP_CSV, script @ ..] => (0, script),
-            // This catches numbers 1-16 and -1. Negative numbers are
-            // invalid for OP_CHECKSEQUENCEVERIFY, but we filter them out
-            // later in `ReclaimScriptInputs::try_new`.
-            [n, OP_CSV, script @ ..]
-                if OP_PUSHNUM_NEG1 == *n || (OP_PUSHNUM_1..=OP_PUSHNUM_16).contains(n) =>
-            {
-                (*n as i64 - OP_PUSHNUM_1 as i64 + 1, script)
-            }
-            // Numbers in bitcoin script are typically only 4 bytes (with a
-            // range from -2**31+1 to 2**31-1), unless we are working with
-            // OP_CSV or OP_CLTV, where 5-byte numbers are acceptable (with
-            // a range of 0 to 2**39-1). See the following for how the code
-            // works in bitcoin-core:
-            // https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L531-L573
-            // That said, we only accepts 4-byte unsigned integers, and we
-            // check that below.
-            [n, rest @ ..] if *n <= 5 && rest.get(*n as usize) == Some(&OP_CSV) => {
-                // We know the error and panic paths cannot happen because
-                // of the above `if` check.
-                let (script_num, [OP_CSV, script @ ..]) = rest.split_at(*n as usize) else {
-                    return Err(Error::InvalidReclaimScript);
-                };
-                (read_scriptint(script_num, 5)?, script)
-            }
-            _ => return Err(Error::InvalidReclaimScript),
-        };
-
-        let lock_time =
-            u32::try_from(lock_time).map_err(|_| Error::InvalidReclaimScriptLockTime(lock_time))?;
-
-        let script = ScriptBuf::from_bytes(script.to_vec());
-        ReclaimScriptInputs::try_new(lock_time, script)
+    /// Parse and validate a reclaim script.
+    pub fn parse(script: &ScriptBuf) -> Result<Self, Error> {
+        sbtc_primitives::deposits::ReclaimScriptInputs::parse(script)
+            .map(Self)
+            .map_err(Into::into)
     }
-}
-
-/// Decodes an integer in script(minimal CScriptNum) format.
-///
-/// # Notes
-///
-/// This code is a slightly modified version of the code in rust-bitcoin:
-/// https://github.com/rust-bitcoin/rust-bitcoin/blob/bitcoin-0.32.2/bitcoin/src/blockdata/script/mod.rs#L158-L200.
-///
-/// The logic here and in rust-bitcoin are both based on the `CScriptNum`
-/// constructor in Bitcoin Core:
-/// https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/script.h#L244C1-L269C6
-fn read_scriptint(v: &[u8], max_size: usize) -> Result<i64, Error> {
-    let last = match v.last() {
-        Some(last) => last,
-        None => return Ok(0),
-    };
-    // In rust-bitcoin, max_size is hardcoded to 4, while in bitcoin-core
-    // it is a variable, and sometimes they set it to 5. This is the only
-    // modification to this function body from rust-bitcoin's code.
-    if v.len() > max_size {
-        return Err(Error::ScriptNum(bitcoin::script::Error::NumericOverflow));
-    }
-    // Comment and code copied from Bitcoin Core:
-    // https://github.com/bitcoin/bitcoin/blob/447f50e4aed9a8b1d80e1891cda85801aeb80b4e/src/script/script.h#L247-L262
-    // If the most-significant-byte - excluding the sign bit - is zero
-    // then we're not minimal. Note how this test also rejects the
-    // negative-zero encoding, 0x80.
-    if (*last & 0x7f) == 0 {
-        // One exception: if there's more than one byte and the most
-        // significant bit of the second-most-significant-byte is set
-        // it would conflict with the sign bit. An example of this case
-        // is +-255, which encode to 0xff00 and 0xff80 respectively.
-        // (big-endian).
-        if v.len() <= 1 || (v[v.len() - 2] & 0x80) == 0 {
-            return Err(Error::ScriptNum(bitcoin::script::Error::NonMinimalPush));
-        }
-    }
-
-    Ok(scriptint_parse(v))
-}
-
-/// Caller to guarantee that `v` is not empty.
-///
-/// # Notes
-///
-/// This code was lifted from rust-bitcoin without modification:
-/// https://github.com/rust-bitcoin/rust-bitcoin/blob/bitcoin-0.32.2/bitcoin/src/blockdata/script/mod.rs#L218-L226C2.
-///
-/// The logic there follows the logic in bitcoin-core:
-/// https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/script.h#L382C1-L400C3
-fn scriptint_parse(v: &[u8]) -> i64 {
-    let (mut ret, sh) = v
-        .iter()
-        .fold((0, 0), |(acc, sh), n| (acc + ((*n as i64) << sh), sh + 8));
-    if v[v.len() - 1] & 0x80 != 0 {
-        ret &= (1 << (sh - 1)) - 1;
-        ret = -ret;
-    }
-    ret
 }
 
 #[cfg(test)]
@@ -1108,6 +795,67 @@ mod tests {
         assert_eq!(v2_deposit_prefix(commitment).as_bytes(), expected);
     }
 
+    #[test_case("SP000000000000000000002Q6VF78"; "standard")]
+    #[test_case("SP000000000000000000002Q6VF78.my-contract"; "contract")]
+    fn typed_builders_match_primitives(address: &str) {
+        let recipient = PrincipalData::parse(address).unwrap();
+        let mut expected = vec![5, 22];
+        expected.extend([0; 20]);
+        if address.ends_with(".my-contract") {
+            expected[0] = 6;
+            expected.push(11);
+            expected.extend(b"my-contract");
+        }
+        assert_eq!(recipient.serialize_to_vec(), expected);
+        let encoded = expected;
+        let key: XOnlyPublicKey =
+            "374bfe83198f423d763ddcad92837229b219117750cf8eee106f59f09ebac157"
+                .parse()
+                .unwrap();
+        let typed = DepositScriptInputs {
+            signers_public_key: key,
+            recipient: recipient.clone(),
+            max_fee: 123_456,
+        };
+        let raw = sbtc_primitives::deposits::DepositScriptInputs {
+            signers_public_key: key,
+            recipient: encoded.clone(),
+            max_fee: 123_456,
+        };
+        assert_eq!(typed.deposit_script(), raw.deposit_script());
+        assert_eq!(
+            DepositScriptInputs::parse(&raw.deposit_script()).unwrap(),
+            typed
+        );
+        let typed =
+            DepositScriptInputsV2::new(BTreeSet::from([key]), 1, recipient.clone(), 123_456)
+                .unwrap();
+        let raw = sbtc_primitives::deposits::DepositScriptInputsV2::new(
+            BTreeSet::from([key]),
+            1,
+            encoded.clone(),
+            123_456,
+        )
+        .unwrap();
+        assert_eq!(typed.deposit_script(), raw.deposit_script());
+        assert_eq!(
+            deposit_data_preimage(123_456, &recipient),
+            sbtc_primitives::deposits::deposit_data_preimage(123_456, &encoded)
+        );
+        assert_eq!(
+            DepositScriptInputsV2::parse(&raw.deposit_script(), recipient.clone(), 123_456)
+                .unwrap(),
+            typed
+        );
+        assert!(matches!(
+            DepositScriptInputsV2::parse(&raw.deposit_script(), recipient, 123_457),
+            Err(Error::InvalidDepositPrefix { .. })
+        ));
+        assert!(matches!(
+            SignerKeySet::new([key], 0),
+            Err(Error::InvalidDepositThreshold { .. })
+        ));
+    }
     /// The inputs and expected outputs of the v2 deposit commitment for one
     /// recipient and max fee.
     struct CommitmentTestCase {
@@ -1366,7 +1114,6 @@ mod tests {
         let reclaim_script = reclaim_p2pk(lock_time as i64);
 
         let extracts = ReclaimScriptInputs::parse(&reclaim_script).unwrap();
-        assert_eq!(extracts.lock_time, LockTime::from_height(lock_time as u16));
         assert_eq!(extracts.lock_time(), lock_time);
         assert_eq!(extracts.reclaim_script(), reclaim_script);
 
@@ -1414,10 +1161,7 @@ mod tests {
             .into_script();
 
         let extracts = ReclaimScriptInputs::parse(&reclaim_script).unwrap();
-        assert_eq!(
-            extracts.lock_time,
-            LockTime::from_consensus(lock_time as u32).unwrap()
-        );
+        assert_eq!(extracts.lock_time(), lock_time as u32);
         assert_eq!(extracts.reclaim_script(), reclaim_script);
     }
 
@@ -1665,7 +1409,8 @@ mod tests {
 
         // Let's modify the lock time of the reclaim script to look more
         // reasonable in the request.
-        setup.reclaims.first_mut().unwrap().lock_time = LockTime::from_height(150);
+        let reclaim = setup.reclaims.first_mut().unwrap();
+        *reclaim = ReclaimScriptInputs::try_new(150, reclaim.user_script().to_owned()).unwrap();
 
         let request = CreateDepositRequest {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),

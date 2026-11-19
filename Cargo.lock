@@ -5776,6 +5776,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "sbtc",
+ "sbtc-primitives",
  "secp256k1 0.29.0",
  "serde",
  "serde_json",
@@ -5785,6 +5786,17 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "sbtc-primitives"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "rand 0.8.5",
+ "secp256k1 0.29.0",
+ "test-case",
+ "thiserror 2.0.11",
 ]
 
 [[package]]

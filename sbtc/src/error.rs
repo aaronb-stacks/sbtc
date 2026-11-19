@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Stacks Open Internet Foundation
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! Top-level error type for the sbtc library
 //!
 
@@ -138,4 +141,40 @@ pub enum Error {
     #[cfg(feature = "testing")]
     #[error("got an error while interacting with test containers: {0}")]
     Testcontainers(#[source] testcontainers::TestcontainersError),
+}
+
+impl From<sbtc_primitives::error::Error> for Error {
+    fn from(error: sbtc_primitives::error::Error) -> Self {
+        use sbtc_primitives::error::Error as Primitive;
+        match error {
+            Primitive::InvalidDepositPrefix { actual, expected } => {
+                Self::InvalidDepositPrefix { actual, expected }
+            }
+            Primitive::InvalidDepositThreshold {
+                signatures_required,
+                signer_count,
+            } => Self::InvalidDepositThreshold {
+                signatures_required,
+                signer_count,
+            },
+            Primitive::TooManySignerKeys { signer_count, max_signers } => {
+                Self::TooManySignerKeys { signer_count, max_signers }
+            }
+            Primitive::InvalidSignerScript => Self::InvalidSignerScript,
+            Primitive::DisabledLockTime(value) => Self::DisabledLockTime(value),
+            Primitive::InvalidDepositCheckSigPart => Self::InvalidDepositCheckSigPart,
+            Primitive::InvalidDepositScript => Self::InvalidDepositScript,
+            Primitive::InvalidDepositScriptLength => Self::InvalidDepositScriptLength,
+            Primitive::InvalidReclaimScriptLength(value) => Self::InvalidReclaimScriptLength(value),
+            Primitive::InvalidReclaimScriptLockTime(value) => {
+                Self::InvalidReclaimScriptLockTime(value)
+            }
+            Primitive::InvalidReclaimScript => Self::InvalidReclaimScript,
+            Primitive::ScriptNum(value) => Self::ScriptNum(value),
+            Primitive::InvalidXOnlyPublicKey(value) => Self::InvalidXOnlyPublicKey(value),
+            Primitive::NonMinimalPushDepositScript => Self::NonMinimalPushDepositScript,
+            Primitive::UnsupportedLockTimeUnits(value) => Self::UnsupportedLockTimeUnits(value),
+            Primitive::ReclaimScriptWithSuccessOp(value) => Self::ReclaimScriptWithSuccessOp(value),
+        }
+    }
 }

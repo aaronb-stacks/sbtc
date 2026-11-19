@@ -1,0 +1,22 @@
+[package]
+name = "sbtc-primitives"
+version = "0.1.0"
+edition = "2024"
+description = "Stacks-independent Bitcoin primitives for sBTC"
+license = "GPL-3.0-only"
+
+[features]
+default = []
+testing = []
+
+[dependencies]
+bitcoin.workspace = true
+secp256k1.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+test-case.workspace = true
+
+[lints]
+workspace = true

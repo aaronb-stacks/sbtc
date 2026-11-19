@@ -10,6 +10,7 @@ members = [
     "emily/handler",
     "emily/openapi-gen",
     "sbtc",
+    "sbtc-primitives",
     "signer",
     "wsts",
 ]
@@ -21,6 +22,7 @@ blocklist-client = { path = "./blocklist-client" }
 emily-client = { path = "./.generated-sources/emily/client/rust/public" }
 emily-handler = { path = "./emily/handler" }
 sbtc = { path = "./sbtc" }
+sbtc-primitives = { path = "./sbtc-primitives" }
 testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 wsts = { path = "./wsts" }
 

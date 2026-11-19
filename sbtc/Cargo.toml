@@ -15,6 +15,7 @@ ignored = ["bitcoincore-rpc-json"]
 default = []
 cli = ["dep:clap", "dep:reqwest", "dep:tokio"]
 testing = [
+    "sbtc-primitives/testing",
     "dep:aws-smithy-http-client",
     "dep:aws-config",
     "dep:aws-sdk-dynamodb",
@@ -28,6 +29,7 @@ testing = [
 webhooks = ["dep:hex"]
 
 [dependencies]
+sbtc-primitives.workspace = true
 bitcoin.workspace = true
 clarity.workspace = true
 rand.workspace = true

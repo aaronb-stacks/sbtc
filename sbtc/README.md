@@ -2,6 +2,14 @@
 
 A library for creating Bitcoin deposit transactions that can be handled by the sBTC signers.
 
+## Reuse from stacks-core
+
+Use [`sbtc-primitives`](../sbtc-primitives) for Bitcoin key derivation, signer sets,
+deposit and reclaim scripts, and Taproot outputs without depending on a particular
+Stacks revision. The existing `sbtc` APIs keep their typed principals and errors
+and delegate Bitcoin construction to that crate. Principal parsing, network
+validation, events, webhooks, CLI, and integration helpers remain here.
+
 ## CLI
 
 The `sbtc` binary computes a Bitcoin address for an sBTC deposit. This is useful for independent verification of deposit addresses. Before sending Bitcoin to a computed address, users are strongly encouraged to use the [bridge](https://sbtc.stacks.co), which registers the deposit with Emily as required to complete the deposit and obtain sBTC.
