@@ -1,13 +1,18 @@
 //! This is the transaction analysis module
 //!
 
+#[cfg(feature = "stacks")]
 use std::collections::BTreeSet;
 
+#[cfg(feature = "stacks")]
 use bitcoin::Address;
+#[cfg(feature = "stacks")]
 use bitcoin::Network;
+#[cfg(feature = "stacks")]
 use bitcoin::OutPoint;
 use bitcoin::Script;
 use bitcoin::ScriptBuf;
+#[cfg(feature = "stacks")]
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::hashes::Hash as _;
@@ -21,16 +26,68 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::LeafVersion;
 use bitcoin::taproot::NodeInfo;
 use bitcoin::taproot::TaprootSpendInfo;
+#[cfg(feature = "stacks")]
 use clarity::codec::StacksMessageCodec as _;
+#[cfg(feature = "stacks")]
 use clarity::types::chainstate::StacksAddress;
+#[cfg(feature = "stacks")]
 use clarity::vm::types::PrincipalData;
+#[cfg(feature = "stacks")]
 use clarity::vm::types::QualifiedContractIdentifier;
 use secp256k1::SECP256K1;
+#[cfg(feature = "stacks")]
 use stacks_common::types::chainstate::STACKS_ADDRESS_ENCODED_SIZE;
 
 use crate::MAX_RECLAIM_SCRIPT_LENGTH;
 use crate::SignerKeySet;
 use crate::error::Error;
+
+/// Construct a v1 deposit leaf using a caller-serialized recipient.
+///
+/// The caller must supply the consensus serialization of a valid `PrincipalData`,
+/// which already bounds its size. External callers enforce this at the integration
+/// boundary using their own Clarity types; this function does not validate bytes.
+pub fn deposit_script(
+    signers_public_key: XOnlyPublicKey,
+    max_fee: u64,
+    recipient: &[u8],
+) -> ScriptBuf {
+    let mut data = PushBytesBuf::with_capacity(recipient.len() + 8);
+    // A serialized principal and fee fit well within PushBytesBuf's u32 limit.
+    data.extend_from_slice(&max_fee.to_be_bytes())
+        .expect("eight fee bytes fit a script push");
+    data.extend_from_slice(recipient)
+        .expect("serialized principal fits a script push");
+    ScriptBuf::builder()
+        .push_slice(data)
+        .push_opcode(opcodes::OP_DROP)
+        .push_slice(signers_public_key.serialize())
+        .push_opcode(opcodes::OP_CHECKSIG)
+        .into_script()
+}
+
+/// Construct a v2 deposit leaf using a caller-serialized recipient.
+///
+/// The recipient must be a valid consensus-serialized principal, as in [`deposit_script`].
+pub fn deposit_script_v2(
+    signer_key_set: &SignerKeySet,
+    max_fee: u64,
+    recipient: &[u8],
+) -> ScriptBuf {
+    let commitment = sha256::Hash::hash(&deposit_data_preimage_bytes(max_fee, recipient));
+    let mut bytes = v2_deposit_prefix(commitment.to_byte_array()).into_bytes();
+    bytes.extend_from_slice(signer_key_set.signing_script().as_bytes());
+    ScriptBuf::from_bytes(bytes)
+}
+
+/// Return the v2 spending preimage using a caller-serialized recipient.
+///
+/// The recipient must be a valid consensus-serialized principal, as in [`deposit_script`].
+pub fn deposit_data_preimage_bytes(max_fee: u64, recipient: &[u8]) -> [u8; 32] {
+    let mut data = max_fee.to_be_bytes().to_vec();
+    data.extend_from_slice(recipient);
+    sha256::Hash::hash(&data).to_byte_array()
+}
 
 /// This is the length of the fixed portion of the deposit script, which
 /// is:
@@ -39,6 +96,7 @@ use crate::error::Error;
 /// ```
 /// Since we are using Schnorr signatures, we only use the x-coordinate of
 /// the public key. The full public key is assumed to be even.
+#[cfg(feature = "stacks")]
 const DEPOSIT_SCRIPT_FIXED_LENGTH: usize = 35;
 
 /// This is the typical number of bytes of a deposit script. It's 1 byte
@@ -47,6 +105,7 @@ const DEPOSIT_SCRIPT_FIXED_LENGTH: usize = 35;
 /// actual standard stacks address, followed by 34 bytes for the fixed
 /// length portion of the deposit script. So we have the standard length is
 /// 1 + 1 + 8 + 21 + 34 = 65.
+#[cfg(feature = "stacks")]
 const STANDARD_SCRIPT_LENGTH: usize =
     1 + 1 + 8 + STACKS_ADDRESS_ENCODED_SIZE as usize + DEPOSIT_SCRIPT_FIXED_LENGTH;
 
@@ -70,12 +129,15 @@ pub const SEQUENCE_LOCKTIME_DISABLE_FLAG: u32 = 1 << 31;
 /// Script opcodes as the bytes in bitcoin Script.
 ///
 /// Drops the top stack item
+#[cfg(feature = "stacks")]
 const OP_DROP: u8 = opcodes::OP_DROP.to_u8();
 /// <https://en.bitcoin.it/wiki/OP_CHECKSIG> pushing 1/0 for
 /// success/failure.
+#[cfg(feature = "stacks")]
 const OP_CHECKSIG: u8 = opcodes::OP_CHECKSIG.to_u8();
 /// Read the next byte as N; push the next N bytes as an array onto the
 /// stack.
+#[cfg(feature = "stacks")]
 const OP_PUSHDATA1: u8 = opcodes::OP_PUSHDATA1.to_u8();
 /// The OP_CHECKSEQUENCEVERIFY opcode described in
 /// https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki
@@ -90,6 +152,7 @@ const OP_PUSHNUM_NEG1: u8 = opcodes::OP_PUSHNUM_NEG1.to_u8();
 /// All the info required to verify the validity of a deposit
 /// transaction. This info is sent by the user to the Emily API
 #[derive(Debug, Clone)]
+#[cfg(feature = "stacks")]
 pub struct CreateDepositRequest {
     /// The output index and txid of the depositing transaction.
     pub outpoint: OutPoint,
@@ -146,6 +209,7 @@ impl DepositSigningInfo {
 /// All the deposit script with the relevant parts of the deposit and
 /// reclaim scripts parsed.
 #[derive(Debug, Clone)]
+#[cfg(feature = "stacks")]
 pub struct DepositInfo {
     /// The UTXO to be spent by the signers.
     pub outpoint: OutPoint,
@@ -166,6 +230,7 @@ pub struct DepositInfo {
     pub lock_time: LockTime,
 }
 
+#[cfg(feature = "stacks")]
 impl DepositInfo {
     /// Return the deposit script version.
     pub fn version(&self) -> DepositScriptVersion {
@@ -174,6 +239,7 @@ impl DepositInfo {
 }
 
 /// Common parsed fields shared by both deposit script versions.
+#[cfg(feature = "stacks")]
 struct ParsedDepositScript {
     /// The canonical deposit leaf reconstructed from the parsed fields.
     deposit_script: ScriptBuf,
@@ -185,6 +251,7 @@ struct ParsedDepositScript {
     signing_info: DepositSigningInfo,
 }
 
+#[cfg(feature = "stacks")]
 impl CreateDepositRequest {
     /// Parse and validate the v2 deposit leaf using the off-chain request
     /// fields committed to by the script.
@@ -301,6 +368,7 @@ impl CreateDepositRequest {
 }
 
 /// Return whether the given principal address is a mainnet address.
+#[cfg(feature = "stacks")]
 fn principal_is_mainnet(principal: PrincipalData) -> bool {
     let standard_address = match principal {
         PrincipalData::Contract(QualifiedContractIdentifier { issuer, .. }) => issuer,
@@ -351,6 +419,7 @@ pub fn to_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) ->
 }
 /// Construct a bitcoin address for a v1 deposit UTXO on the given
 /// network.
+#[cfg(feature = "stacks")]
 fn p2tr_address(deposit_script: ScriptBuf, reclaim_script: ScriptBuf, network: Network) -> Address {
     let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
     let merkle_root = to_taproot(deposit_script, reclaim_script).merkle_root();
@@ -369,6 +438,7 @@ pub fn to_v2_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf)
 /// This struct contains the key variable inputs when constructing a
 /// deposit script address.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(feature = "stacks")]
 pub struct DepositScriptInputs {
     /// The last known public key of the signers.
     pub signers_public_key: XOnlyPublicKey,
@@ -379,6 +449,7 @@ pub struct DepositScriptInputs {
     pub max_fee: u64,
 }
 
+#[cfg(feature = "stacks")]
 impl DepositScriptInputs {
     /// Construct a bitcoin address for a deposit UTXO on the given
     /// network and reclaim script.
@@ -389,32 +460,8 @@ impl DepositScriptInputs {
 
     /// Construct a deposit script from the inputs
     pub fn deposit_script(&self) -> ScriptBuf {
-        // The format of the OP_DROP data, as shown in
-        // https://github.com/stacks-network/sbtc/issues/30, is 8 bytes for
-        // the max fee followed by up to 151 bytes for the stacks address.
-        let recipient_bytes = self.recipient.serialize_to_vec();
-        let mut op_drop_data = PushBytesBuf::with_capacity(recipient_bytes.len() + 8);
-        // These should never fail. The PushBytesBuf type only
-        // errors if the total length of the buffer is greater than
-        // u32::MAX. We're pushing a max of 159 bytes.
-        op_drop_data
-            .extend_from_slice(&self.max_fee.to_be_bytes())
-            .expect("8 is greater than u32::MAX?");
-        op_drop_data
-            .extend_from_slice(&recipient_bytes)
-            .expect("159 is greater than u32::MAX?");
-        // When using the bitcoin::script::Builder, push_slice
-        // automatically inserts the appropriate opcodes based on the data
-        // size to be pushed onto the stack. Here, OP_PUSHBYTES_32 is
-        // pushed before the public key. Also, OP_PUSHBYTES_N is used if
-        // the OP_DROP data length is between 1 and 75 otherwise
-        // OP_PUSHDATA1 is used since the data length is less than 255.
-        ScriptBuf::builder()
-            .push_slice(op_drop_data)
-            .push_opcode(opcodes::OP_DROP)
-            .push_slice(self.signers_public_key.serialize())
-            .push_opcode(opcodes::OP_CHECKSIG)
-            .into_script()
+        let bytes = self.recipient.serialize_to_vec();
+        deposit_script(self.signers_public_key, self.max_fee, &bytes)
     }
 
     /// This function checks that the deposit script is valid.
@@ -546,6 +593,7 @@ impl DepositScriptInputs {
 /// recomputes the commitment from the supplied recipient and maximum fee,
 /// so a script is rejected if either value does not match.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(feature = "stacks")]
 pub struct DepositScriptInputsV2 {
     /// The validated signer key set encoded by the deposit script.
     pub signer_key_set: SignerKeySet,
@@ -555,6 +603,7 @@ pub struct DepositScriptInputsV2 {
     pub max_fee: u64,
 }
 
+#[cfg(feature = "stacks")]
 impl DepositScriptInputsV2 {
     /// Create validated v2 deposit inputs.
     pub fn new(
@@ -584,10 +633,8 @@ impl DepositScriptInputsV2 {
     /// signers' `multi_a` script, which is exactly
     /// [`SignerKeySet::signing_script`].
     pub fn deposit_script(&self) -> ScriptBuf {
-        let commitment = deposit_data_commitment(self.max_fee, &self.recipient);
-        let mut bytes = v2_deposit_prefix(commitment).into_bytes();
-        bytes.extend_from_slice(self.signer_key_set.signing_script().as_bytes());
-        ScriptBuf::from_bytes(bytes)
+        let bytes = self.recipient.serialize_to_vec();
+        deposit_script_v2(&self.signer_key_set, self.max_fee, &bytes)
     }
 
     /// Parse and validate the v2 deposit script against recipient and
@@ -627,13 +674,14 @@ impl DepositScriptInputsV2 {
 
 /// Return the 32-byte preimage that a v2 deposit script commits to, and that
 /// the signers reveal when spending the deposit.
+#[cfg(feature = "stacks")]
 pub fn deposit_data_preimage(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] {
-    let mut data = max_fee.to_be_bytes().to_vec();
-    data.extend(recipient.serialize_to_vec());
-    sha256::Hash::hash(&data).to_byte_array()
+    let bytes = recipient.serialize_to_vec();
+    deposit_data_preimage_bytes(max_fee, &bytes)
 }
 
 /// Return the hash committed to by a v2 deposit script.
+#[cfg(feature = "stacks")]
 fn deposit_data_commitment(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] {
     sha256::Hash::hash(&deposit_data_preimage(max_fee, recipient)).to_byte_array()
 }
@@ -924,7 +972,7 @@ fn scriptint_parse(v: &[u8]) -> i64 {
     ret
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "stacks"))]
 mod tests {
     use bitcoin::AddressType;
     use bitcoin::NetworkKind;
@@ -947,6 +995,49 @@ mod tests {
     use test_case::test_case;
 
     const CONTRACT_ADDRESS: &str = "ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y.contract-name";
+
+    /// The typed adapter must preserve serialized principals across both push encodings.
+    #[test]
+    fn typed_and_encoded_deposit_builders_agree() {
+        let standard = "SP000000000000000000002Q6VF78";
+        let mut recipients = vec![PrincipalData::parse(standard).unwrap()];
+        for length in [1, 44, 45, 128] {
+            recipients
+                .push(PrincipalData::parse(&format!("{standard}.{}", "a".repeat(length))).unwrap());
+        }
+        let key = SecretKey::from_slice(&[1; 32])
+            .unwrap()
+            .x_only_public_key(SECP256K1)
+            .0;
+        for recipient in recipients {
+            let bytes = recipient.serialize_to_vec();
+            let v1 = DepositScriptInputs {
+                signers_public_key: key,
+                recipient: recipient.clone(),
+                max_fee: 123_456,
+            };
+            let v2 =
+                DepositScriptInputsV2::new(BTreeSet::from([key]), 1, recipient.clone(), v1.max_fee)
+                    .unwrap();
+            assert_eq!(v1.deposit_script(), deposit_script(key, v1.max_fee, &bytes));
+            assert_eq!(
+                v2.deposit_script(),
+                deposit_script_v2(&v2.signer_key_set, v2.max_fee, &bytes)
+            );
+            assert_eq!(
+                deposit_data_preimage(v1.max_fee, &recipient),
+                deposit_data_preimage_bytes(v1.max_fee, &bytes)
+            );
+            assert_eq!(
+                DepositScriptInputs::parse(&v1.deposit_script()).unwrap(),
+                v1
+            );
+            assert_eq!(
+                DepositScriptInputsV2::parse(&v2.deposit_script(), recipient, v2.max_fee).unwrap(),
+                v2
+            );
+        }
+    }
 
     /// A full reclaim script with a p2pk script at the end.
     fn reclaim_p2pk(lock_time: i64) -> ScriptBuf {

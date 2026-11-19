@@ -12,9 +12,12 @@ required-features = ["cli"]
 ignored = ["bitcoincore-rpc-json"]
 
 [features]
-default = []
-cli = ["dep:clap", "dep:reqwest", "dep:tokio"]
+default = ["stacks"]
+stacks = ["dep:clarity", "dep:stacks-common"]
+cli = ["stacks", "dep:clap", "dep:reqwest", "dep:tokio"]
 testing = [
+    "stacks",
+    "dep:serde_json",
     "dep:aws-smithy-http-client",
     "dep:aws-config",
     "dep:aws-sdk-dynamodb",
@@ -25,16 +28,16 @@ testing = [
     "dep:tokio",
     "dep:url",
 ]
-webhooks = ["dep:hex"]
+webhooks = ["stacks", "dep:hex"]
 
 [dependencies]
 bitcoin.workspace = true
-clarity.workspace = true
+clarity = { workspace = true, optional = true }
 rand.workspace = true
 secp256k1.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-stacks-common.workspace = true
+serde_json = { workspace = true, optional = true, features = ["std"] }
+stacks-common = { workspace = true, optional = true }
 thiserror.workspace = true
 
 # Optional Dependencies

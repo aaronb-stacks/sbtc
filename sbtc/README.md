@@ -69,3 +69,28 @@ $ ./target/release/sbtc compute-deposit-address <STACKS_RECIPIENT> \
 ```
 
 The default maximum L1 sweep fee is 80,000 satoshis and the default relative reclaim lock time is 950 Bitcoin blocks, matching the values used on the sBTC bridge at [sbtc.stacks.co](https://sbtc.stacks.co). Use `--help` to see overrides for these values, the signers' aggregate public key, the Stacks API, the registry deployer, and the Bitcoin network.
+
+# Library features
+
+The default `stacks` feature retains the typed Clarity deposit APIs, principal
+parsing and network validation, and Stacks events. The `cli`, `webhooks`, and
+`testing` features also enable `stacks`.
+
+Consumers that already provide their own Stacks types can disable default features:
+
+```toml
+sbtc = { git = "https://github.com/stacks-sbtc/sbtc", rev = "<revision>", default-features = false }
+```
+
+This exposes signer-key derivation, `SignerKeySet`, reclaim scripts, Taproot
+helpers, and `deposits::{deposit_script, deposit_script_v2,
+deposit_data_preimage_bytes}` without a dependency on stacks-core packages.
+Serialize a valid principal using the consumer's Clarity version and pass its
+bytes directly. `PrincipalData` already bounds the serialized size; external
+callers enforce this at the integration boundary. These builders do not validate
+principal bytes or check the network. They preserve the existing fee encoding
+and script formats.
+
+Cargo unifies features for the same package. If another dependency enables
+`sbtc/stacks` (including through `cli`, `webhooks`, or `testing`), the Stacks
+dependencies return. Check the final application's resolved graph.

@@ -7,6 +7,7 @@ use bitcoin::XOnlyPublicKey;
 
 pub mod deposits;
 pub mod error;
+#[cfg(feature = "stacks")]
 pub mod events;
 pub mod idpack;
 pub mod leb128;
@@ -17,10 +18,10 @@ pub use signer_keys::SignerKeySet;
 pub use signer_keys::derive_signing_public_key;
 pub use signer_keys::derive_signing_secret_key;
 
-#[cfg(any(test, feature = "webhooks"))]
+#[cfg(any(all(test, feature = "stacks"), feature = "webhooks"))]
 pub mod webhooks;
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(feature = "testing")]
 pub mod testing;
 
 /// Maximum number of signing keys in a v2 key set.

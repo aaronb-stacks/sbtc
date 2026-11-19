@@ -77,10 +77,12 @@ pub enum Error {
     #[error("deposit script did not follow the minimal push rule")]
     NonMinimalPushDepositScript,
     /// Could not parse the Stacks principal address.
+    #[cfg(feature = "stacks")]
     #[error("could not parse the stacks principal address: {0}")]
     ParseStacksAddress(#[source] stacks_common::codec::Error),
     /// The network of the recipient address does not match the expected
     /// network.
+    #[cfg(feature = "stacks")]
     #[error("incorrect network of the recipient address: {0}")]
     RecipientNetworkMismatch(clarity::vm::types::PrincipalData),
     /// This happens when the lock-time is given in time units instead of
@@ -110,17 +112,17 @@ pub enum Error {
     ReclaimScriptWithSuccessOp(bitcoin::ScriptBuf),
 
     /// This is thrown when failing to parse a hex string into bytes.
-    #[cfg(any(test, feature = "webhooks"))]
+    #[cfg(any(all(test, feature = "stacks"), feature = "webhooks"))]
     #[error("could not decode the hex string into bytes: {0}")]
     DecodeHexBytes(#[source] hex::FromHexError),
     /// This is thrown when failing to parse a hex string into bytes when
     /// deserializing a string into a Stacks type.
-    #[cfg(any(test, feature = "webhooks"))]
+    #[cfg(any(all(test, feature = "stacks"), feature = "webhooks"))]
     #[error("could not parse hex to Stacks type {1}: {0}")]
     DecodeHexArray(#[source] bitcoin::hex::HexToArrayError, &'static str),
     /// An error when attempting to generically decode bytes using the
     /// trait implementation.
-    #[cfg(any(test, feature = "webhooks"))]
+    #[cfg(any(all(test, feature = "stacks"), feature = "webhooks"))]
     #[error("got an error when attempting to call StacksMessageCodec::consensus_deserialize {0}")]
     StacksCodec(#[source] stacks_common::codec::Error),
 
